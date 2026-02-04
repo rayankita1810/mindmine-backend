@@ -1,5 +1,8 @@
+require('dotenv').config();
 const Application = require("../models/Application");
-const nodemailer = require("nodemailer");
+const sgMail = require("@sendgrid/mail");
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ================= GET ALL =================
 exports.getAllApplications = async (req, res) => {
@@ -16,41 +19,14 @@ exports.getAllApplications = async (req, res) => {
 exports.createApplication = async (req, res) => {
   try {
     const {
-      fullName,
-      email,
-      phone,
-      course,
-
-      campus,
-      campusLocation,
-
-      dob,
-      gender,
-      caste,
-      aadhaar,
-
-      address,
-      city,
-      pin,
-      state,
-
-      lastQualification,
-      previousCourse,
-      previousInstitute,
-      passingYear,
-      percentage,
-
-      fatherName,
-      fatherOccupation,
-      fatherPhone,
-
-      motherName,
-      motherOccupation,
-      motherPhone,
-
-      guardianName,
-      guardianRelation,
-      guardianPhone,
+      fullName, email, phone, course,
+      campus, campusLocation,
+      dob, gender, caste, aadhaar,
+      address, city, pin, state,
+      lastQualification, previousCourse, previousInstitute, passingYear, percentage,
+      fatherName, fatherOccupation, fatherPhone,
+      motherName, motherOccupation, motherPhone,
+      guardianName, guardianRelation, guardianPhone,
     } = req.body;
 
     // ✅ Basic required validation
@@ -62,65 +38,45 @@ exports.createApplication = async (req, res) => {
     }
 
     // ✅ Tracking ID
-    const trackingId =
-      "TRK-" + Date.now() + "-" + Math.floor(1000 + Math.random() * 9000);
+    const trackingId = "TRK-" + Date.now() + "-" + Math.floor(1000 + Math.random() * 9000);
 
     // ✅ Save everything
     const newApp = await Application.create({
       trackingId,
-
       campus,
       campusLocation,
       course,
-
       fullName,
       dob,
       gender,
       caste,
       aadhaar,
-
       address,
       city,
       state,
       pinCode: pin,
-
       lastQualification,
       previousCourse,
       previousInstitute,
       passingYear,
       percentage,
-
       phone,
       email,
-
       fatherName,
       fatherOccupation,
       fatherPhone,
-
       motherName,
       motherOccupation,
       motherPhone,
-
       guardianName,
       guardianRelation,
       guardianPhone,
     });
 
     // ================= EMAIL =================
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT),
-      secure: Number(process.env.SMTP_PORT) === 465,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    // 📩 Admin email (FULL DATA)
     const adminMail = {
-      from: `"Mindmine Academy" <${process.env.CONTACT_EMAIL}>`,
-      to: process.env.CONTACT_EMAIL,
+      to: process.env.CONTACT_EMAIL,                     // College/admin email
+      from: process.env.SENDGRID_VERIFIED_SENDER,        // Verified sender
       subject: `New Application – ${trackingId}`,
       html: `
         <h3>🎓 New Student Application</h3>
@@ -159,41 +115,44 @@ exports.createApplication = async (req, res) => {
       `,
     };
 
-    // 📧 Student email
     const studentMail = {
-      from: `"Mindmine Academy" <${process.env.CONTACT_EMAIL}>`,
-      to: email,
+      to: email,                                        // Student email
+      from: process.env.SENDGRID_VERIFIED_SENDER,      // Verified sender
       subject: "Mindmine Academy – Application Received",
       html: `
         <p>Hello ${fullName},</p>
         <p>Your application has been received successfully.</p>
         <p><strong>Tracking ID:</strong> ${trackingId}</p>
         <p>Our team will contact you shortly.</p>
+        <p>Please check your inbox or spam folder for confirmation.</p>
         <br/>
         <p>Regards,<br/>Mindmine Academy Team</p>
       `,
     };
 
-    await Promise.all([
-      transporter.sendMail(adminMail),
-      transporter.sendMail(studentMail),
+    // ✅ Send emails in parallel and log responses
+    const [adminResponse, studentResponse] = await Promise.all([
+      sgMail.send(adminMail),
+      sgMail.send(studentMail),
     ]);
+
+    console.log("Admin email status:", adminResponse[0].statusCode);
+    console.log("Student email status:", studentResponse[0].statusCode);
 
     res.status(201).json({
       success: true,
       message: "Application submitted successfully",
       trackingId,
     });
+
   } catch (err) {
-    console.error("Application submit error:", err);
+    console.error("Application submit error:", err.response?.body || err);
     res.status(500).json({
       success: false,
       message: "Failed to submit application",
     });
   }
 };
-
-
 
 // ================= APPROVE / REJECT =================
 exports.updateStatus = async (req, res) => {
@@ -227,18 +186,11 @@ exports.checkStatus = async (req, res) => {
     const { trackingId } = req.params;
 
     const app = await Application.findOne({ trackingId });
-
     if (!app) {
-      return res.status(404).json({
-        success: false,
-        message: "Invalid tracking ID"
-      });
+      return res.status(404).json({ success: false, message: "Invalid tracking ID" });
     }
 
-    res.json({
-      success: true,
-      status: app.status
-    });
+    res.json({ success: true, status: app.status });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false });
