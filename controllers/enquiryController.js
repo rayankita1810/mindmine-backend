@@ -1,6 +1,7 @@
 const Enquiry = require("../models/Enquiry");
-const nodemailer = require("nodemailer");
+const sgMail = require("@sendgrid/mail");
 
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 // Get all enquiries
 exports.getAllEnquiries = async (req, res) => {
   try {
@@ -14,8 +15,6 @@ exports.getAllEnquiries = async (req, res) => {
 
 // Create enquiry and send email
 exports.createEnquiry = async (req, res) => {
-  console.log("REQ BODY:", req.body);
-
   const { name, email, phone, course, lastQualification, message } = req.body;
 
   const missingFields = [];
@@ -35,37 +34,15 @@ exports.createEnquiry = async (req, res) => {
   }
 
   try {
-    // 1️⃣ Save enquiry
+    // Save enquiry
     const enquiry = await Enquiry.create({
-      name,
-      email,
-      phone,
-      course,
-      lastQualification,
-      message,
+      name, email, phone, course, lastQualification, message,
     });
 
-    // 2️⃣ Create transporter (Render-safe)
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
-
-    await transporter.verify();
-    console.log("SMTP connected on Render");
-
-    // 3️⃣ Mail to admin
-    await transporter.sendMail({
-      from: `"${name}" <${process.env.SMTP_USER}>`,
+    // Email to admin
+    await sgMail.send({
       to: process.env.CONTACT_EMAIL,
+      from: "no-reply@mindmine.com",
       subject: `New Enquiry: ${course}`,
       html: `
         <h3>📩 New Enquiry Received</h3>
@@ -80,10 +57,10 @@ exports.createEnquiry = async (req, res) => {
       `,
     });
 
-    // 4️⃣ Auto-reply to user
-    await transporter.sendMail({
-      from: `"Mindmine Academy" <${process.env.SMTP_USER}>`,
+    // Auto-reply to user
+    await sgMail.send({
       to: email,
+      from: "no-reply@mindmine.com",
       subject: "Mindmine Academy – Enquiry Received",
       html: `
         <p>Hello ${name},</p>
@@ -95,16 +72,12 @@ exports.createEnquiry = async (req, res) => {
       `,
     });
 
-    console.log("Emails sent successfully:", enquiry._id);
-
-    // 5️⃣ Respond
     res.status(201).json({
       success: true,
       message: "Enquiry submitted successfully",
     });
   } catch (err) {
     console.error("ENQUIRY ERROR FULL:", err);
-
     res.status(500).json({
       success: false,
       message: err.message,
