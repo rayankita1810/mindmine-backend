@@ -1,5 +1,5 @@
+require('dotenv').config();
 const Enquiry = require("../models/Enquiry");
-const nodemailer = require("nodemailer");
 
 // Get all enquiries
 exports.getAllEnquiries = async (req, res) => {
@@ -13,9 +13,11 @@ exports.getAllEnquiries = async (req, res) => {
 };
 
 // Create enquiry and send email
-exports.createEnquiry = async (req, res) => {
-  console.log("REQ BODY:", req.body);
+const sgMail = require("@sendgrid/mail");
 
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+exports.createEnquiry = async (req, res) => {
   const { name, email, phone, course, lastQualification, message } = req.body;
 
   const missingFields = [];
@@ -27,45 +29,17 @@ exports.createEnquiry = async (req, res) => {
   if (!message) missingFields.push("message");
 
   if (missingFields.length > 0) {
-    return res.status(400).json({
-      success: false,
-      message: "Missing required fields",
-      missingFields,
-    });
+    return res.status(400).json({ success: false, message: "Missing fields", missingFields });
   }
 
   try {
-    // 1️⃣ Save enquiry
-    const enquiry = await Enquiry.create({
-      name,
-      email,
-      phone,
-      course,
-      lastQualification,
-      message,
-    });
+    // 1️⃣ Save enquiry in DB
+    const enquiry = await Enquiry.create({ name, email, phone, course, lastQualification, message });
 
-    // 2️⃣ Create transporter (Render-safe)
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
-
-    await transporter.verify();
-    console.log("SMTP connected on Render");
-
-    // 3️⃣ Mail to admin
-    await transporter.sendMail({
-      from: `"${name}" <${process.env.SMTP_USER}>`,
-      to: process.env.CONTACT_EMAIL,
+    // 2️⃣ Email to admin
+    await sgMail.send({
+      to: process.env.SENDGRID_VERIFIED_SENDER,
+      from: process.env.SENDGRID_VERIFIED_SENDER,
       subject: `New Enquiry: ${course}`,
       html: `
         <h3>📩 New Enquiry Received</h3>
@@ -80,10 +54,10 @@ exports.createEnquiry = async (req, res) => {
       `,
     });
 
-    // 4️⃣ Auto-reply to user
-    await transporter.sendMail({
-      from: `"Mindmine Academy" <${process.env.SMTP_USER}>`,
+    // 3️⃣ Auto-reply to user
+    await sgMail.send({
       to: email,
+      from: process.env.SENDGRID_VERIFIED_SENDER,
       subject: "Mindmine Academy – Enquiry Received",
       html: `
         <p>Hello ${name},</p>
@@ -95,20 +69,11 @@ exports.createEnquiry = async (req, res) => {
       `,
     });
 
-    console.log("Emails sent successfully:", enquiry._id);
+    res.status(201).json({ success: true, message: "Enquiry submitted successfully" });
 
-    // 5️⃣ Respond
-    res.status(201).json({
-      success: true,
-      message: "Enquiry submitted successfully",
-    });
   } catch (err) {
-    console.error("ENQUIRY ERROR FULL:", err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message,
-      stack: err.stack,
-    });
+    console.error("ENQUIRY ERROR:", err);
+    res.status(500).json({ success: false, message: err.message, stack: err.stack });
   }
 };
+
